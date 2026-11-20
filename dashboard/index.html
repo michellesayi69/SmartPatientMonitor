@@ -3,46 +3,214 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SmartPatientMonitor — Live Dashboard</title>
+    <title>SmartPatientMonitor | Live Telemetry</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #121212; color: #fff; text-align: center; padding: 50px; }
-        .card { background: #1e1e1e; border-radius: 10px; padding: 20px; margin: 10px; display: inline-block; width: 200px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-        .value { font-size: 2.5em; font-weight: bold; margin: 10px 0; }
-        .unit { font-size: 0.5em; color: #aaa; }
-        #status { margin-top: 30px; padding: 15px; border-radius: 5px; font-weight: bold; font-size: 1.2em; background: #2e7d32; }
-        .critical { background: #d32f2f !important; animation: flash 1s infinite; }
-        @keyframes flash { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+        :root {
+            --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --card-border: rgba(255, 255, 255, 0.1);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent-red: #ef4444;
+            --accent-blue: #3b82f6;
+            --accent-orange: #f59e0b;
+            --success: #10b981;
+            --danger: #ef4444;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-gradient);
+            color: var(--text-main);
+            min-height: 100vh;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 3rem;
+            animation: fadeInDown 0.8s ease-out;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 800;
+            margin: 0;
+            background: linear-gradient(to right, #60a5fa, #c084fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -1px;
+        }
+
+        .header p {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+            margin-top: 0.5rem;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        .dashboard {
+            display: flex;
+            gap: 2rem;
+            perspective: 1000px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--card-border);
+            border-radius: 24px;
+            padding: 2rem 3rem;
+            width: 160px;
+            text-align: center;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 30px 60px -12px rgba(0, 0, 0, 0.6);
+        }
+
+        /* Glow effects */
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 4px;
+        }
+        .card.hr::before { background: var(--accent-red); box-shadow: 0 0 20px var(--accent-red); }
+        .card.spo2::before { background: var(--accent-blue); box-shadow: 0 0 20px var(--accent-blue); }
+        .card.temp::before { background: var(--accent-orange); box-shadow: 0 0 20px var(--accent-orange); }
+
+        .card h2 {
+            font-size: 1rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin: 0 0 1rem 0;
+        }
+
+        .value-container {
+            display: flex;
+            align-items: baseline;
+            justify-content: center;
+            gap: 0.2rem;
+        }
+
+        .value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 3.5rem;
+            font-weight: 700;
+            line-height: 1;
+        }
+
+        .unit {
+            font-size: 1rem;
+            color: var(--text-muted);
+            font-weight: 600;
+        }
+
+        .status-banner {
+            margin-top: 3rem;
+            padding: 1rem 4rem;
+            border-radius: 50px;
+            font-weight: 600;
+            font-size: 1.1rem;
+            letter-spacing: 1px;
+            transition: all 0.3s ease;
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: var(--success);
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.1);
+            animation: fadeInUp 0.8s ease-out;
+        }
+
+        .status-banner.critical {
+            background: rgba(239, 68, 68, 0.15);
+            border-color: var(--danger);
+            color: #fca5a5;
+            box-shadow: 0 0 30px rgba(239, 68, 68, 0.4);
+            animation: pulseAlert 1s infinite alternate;
+        }
+
+        /* Heartbeat Animation */
+        @keyframes heartbeat {
+            0% { transform: scale(1); }
+            15% { transform: scale(1.08); }
+            30% { transform: scale(1); }
+            45% { transform: scale(1.08); }
+            60% { transform: scale(1); }
+        }
+        .heartbeat-active {
+            animation: heartbeat 1s infinite;
+            color: #fca5a5;
+            text-shadow: 0 0 20px rgba(239, 68, 68, 0.6);
+        }
+
+        @keyframes fadeInDown { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes pulseAlert {
+            from { box-shadow: 0 0 20px rgba(239, 68, 68, 0.2); }
+            to { box-shadow: 0 0 50px rgba(239, 68, 68, 0.6); }
+        }
     </style>
 </head>
 <body>
-    <h1>SmartPatientMonitor</h1>
-    <p>Live ESP32 Telemetry</p>
 
-    <div class="card">
-        <div>Heart Rate</div>
-        <div class="value" id="hr">--</div>
-        <div class="unit">bpm</div>
-    </div>
-    <div class="card">
-        <div>SpO₂</div>
-        <div class="value" id="spo2">--</div>
-        <div class="unit">%</div>
-    </div>
-    <div class="card">
-        <div>Temperature</div>
-        <div class="value" id="temp">--</div>
-        <div class="unit">°C</div>
+    <div class="header">
+        <h1>SmartPatientMonitor</h1>
+        <p>Live ESP32 Telemetry</p>
     </div>
 
-    <div id="status">Connecting to MQTT...</div>
+    <div class="dashboard">
+        <div class="card hr">
+            <h2>Heart Rate</h2>
+            <div class="value-container">
+                <div class="value" id="hr">--</div>
+                <div class="unit">bpm</div>
+            </div>
+        </div>
+        
+        <div class="card spo2">
+            <h2>SpO₂</h2>
+            <div class="value-container">
+                <div class="value" id="spo2">--</div>
+                <div class="unit">%</div>
+            </div>
+        </div>
+        
+        <div class="card temp">
+            <h2>Temperature</h2>
+            <div class="value-container">
+                <div class="value" id="temp">--</div>
+                <div class="unit">°C</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="status" class="status-banner">Connecting to MQTT...</div>
 
     <script>
         const client = mqtt.connect('wss://broker.hivemq.com:8884/mqtt');
+        const hrElement = document.getElementById('hr');
+        const statusEl = document.getElementById('status');
 
         client.on('connect', () => {
-            document.getElementById('status').innerText = 'Connected. Waiting for data...';
-            document.getElementById('status').style.background = '#1976d2';
+            statusEl.innerText = 'Connected. Waiting for data...';
+            statusEl.className = 'status-banner';
             client.subscribe('patient/sensor');
             client.subscribe('patient/alert');
         });
@@ -53,14 +221,17 @@
             if (topic === 'patient/sensor') {
                 try {
                     const data = JSON.parse(msg);
-                    document.getElementById('hr').innerText = data.hr;
+                    hrElement.innerText = data.hr;
                     document.getElementById('spo2').innerText = data.spo2;
                     document.getElementById('temp').innerText = data.temp.toFixed(1);
                     
-                    const statusEl = document.getElementById('status');
+                    // Add heartbeat animation to HR
+                    if(data.hr > 0) hrElement.classList.add('heartbeat-active');
+
+                    // If we receive normal data, clear the critical state
                     if (!statusEl.classList.contains('critical')) {
                         statusEl.innerText = 'Patient Status: NORMAL';
-                        statusEl.style.background = '#2e7d32';
+                        statusEl.className = 'status-banner';
                     }
                 } catch (e) {
                     console.error("Invalid JSON", msg);
@@ -68,14 +239,14 @@
             }
 
             if (topic === 'patient/alert' && msg === 'CRITICAL') {
-                const statusEl = document.getElementById('status');
                 statusEl.innerText = '⚠️ CRITICAL ALERT ⚠️';
-                statusEl.classList.add('critical');
+                statusEl.className = 'status-banner critical';
             }
         });
 
         client.on('error', (err) => {
-            document.getElementById('status').innerText = 'MQTT Connection Error';
+            statusEl.innerText = 'MQTT Connection Error';
+            statusEl.className = 'status-banner critical';
         });
     </script>
 </body>
