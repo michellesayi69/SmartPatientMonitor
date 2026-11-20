@@ -1,8 +1,5 @@
 /*
  * SmartPatientMonitor - ESP32-S3 Firmware
- * Generates simulated vitals (HR, SpO2, temperature) and publishes them
- * over MQTT. Includes edge-based anomaly detection, SPIFFS buffering
- * for network outages, adaptive deep sleep, and two-way control.
  */
 
 #include <WiFi.h>
@@ -51,10 +48,7 @@ PubSubClient client(espClient);
 
 // ================= Helpers =================
 void saveToBuffer(const char* payload) {
-  if (!spiffsAvailable) {
-    Serial.println("Buffer skipped: SPIFFS not available.");
-    return;
-  }
+  if (!spiffsAvailable) return;
   File file = SPIFFS.open("/buffer.txt", FILE_APPEND);
   if (file) {
     file.println(payload);
@@ -69,8 +63,15 @@ void replayBuffer() {
   Serial.println("Replaying buffered data...");
   while (file.available()) {
     String line = file.readStringUntil('\n');
+    line.trim();
     if (line.length() > 0 && client.connected()) {
-      client.publish("patient/sensor", line.c_str());
+      // Route messages to the correct topic based on prefix
+      if (line.startsWith("ALERT:")) {
+        String alertMsg = line.substring(6); // Remove "ALERT:"
+        client.publish("patient/alert", alertMsg.c_str());
+      } else {
+        client.publish("patient/sensor", line.c_str());
+      }
       delay(50);
     }
   }
@@ -101,7 +102,7 @@ void checkThresholds() {
       if (client.connected()) {
         client.publish("patient/alert", "CRITICAL");
       } else {
-        saveToBuffer("ALERT:CRITICAL");
+        saveToBuffer("ALERT:CRITICAL"); // Saved with a prefix for routing later
       }
     }
   }
@@ -189,9 +190,8 @@ void setup() {
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   digitalWrite(LED_PIN, LOW);
 
-  // Check SPIFFS, but don't crash if it's missing (like in Wokwi)
   if (!SPIFFS.begin(true)) {
-    Serial.println("⚠️ SPIFFS mount failed. Offline buffering will be disabled.");
+    Serial.println("⚠️ SPIFFS mount failed. Offline buffering disabled.");
     spiffsAvailable = false;
   } else {
     Serial.println("SPIFFS mounted successfully.");
