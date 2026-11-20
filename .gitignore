@@ -1,0 +1,25 @@
+# macOS
+.DS_Store
+
+# Android Studio
+.idea/
+.gradle/
+build/
+app/build/
+local.properties
+*.iml
+*.apk
+*.aab
+
+# IDE
+.vscode/
+
+# Keystore
+*.jks
+*.keystore
+
+# Firmware
+firmware/build/
+*.elf
+*.bin
+firmware/secrets.h
