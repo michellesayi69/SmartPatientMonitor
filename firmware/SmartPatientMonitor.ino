@@ -1,12 +1,8 @@
 /*
  * SmartPatientMonitor - ESP32-S3 Firmware
- * 
  * Generates simulated vitals (HR, SpO2, temperature) and publishes them
  * over MQTT. Includes edge-based anomaly detection, SPIFFS buffering
  * for network outages, adaptive deep sleep, and two-way control.
- * 
- * Board: ESP32-S3 (any variant, e.g., ESP32-S3-N16R8)
- * Framework: Arduino
  */
 
 #include <WiFi.h>
@@ -39,10 +35,11 @@ const int NORMAL_SPO2_MIN = 95;
 const float NORMAL_TEMP_MAX = 38.0;
 
 // ================= Power =================
-#define ENABLE_DEEP_SLEEP 0   // set to 1 for final build
+#define ENABLE_DEEP_SLEEP 0
 const unsigned long STABLE_SLEEP_MS = 10000;
 
 volatile bool criticalCondition = false;
+bool spiffsAvailable = false;
 
 // ================= FreeRTOS =================
 TaskHandle_t sensorTaskHandle = NULL;
@@ -54,6 +51,10 @@ PubSubClient client(espClient);
 
 // ================= Helpers =================
 void saveToBuffer(const char* payload) {
+  if (!spiffsAvailable) {
+    Serial.println("Buffer skipped: SPIFFS not available.");
+    return;
+  }
   File file = SPIFFS.open("/buffer.txt", FILE_APPEND);
   if (file) {
     file.println(payload);
@@ -62,6 +63,7 @@ void saveToBuffer(const char* payload) {
 }
 
 void replayBuffer() {
+  if (!spiffsAvailable) return;
   File file = SPIFFS.open("/buffer.txt", FILE_READ);
   if (!file) return;
   Serial.println("Replaying buffered data...");
@@ -93,7 +95,6 @@ void publishVitals() {
 }
 
 void checkThresholds() {
-  // Edge alert: critical condition detected locally
   if (hr > CRITICAL_HR || spo2 < CRITICAL_SPO2) {
     if (!criticalCondition) {
       criticalCondition = true;
@@ -108,7 +109,7 @@ void checkThresholds() {
 
 // ================= MQTT Callback =================
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
-  String cmd = String((char*)payload).substring(0, length);
+  String cmd = String((char*)payload, length);
   if (cmd == "ALARM_ON") {
     criticalCondition = true;
     Serial.println("Remote ALARM_ON received");
@@ -121,7 +122,6 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 // ================= Task 1: Sensor =================
 void sensorTask(void *pv) {
   while (1) {
-    // Simulated vitals with realistic variation
     hr   += random(-4, 5);
     hr    = constrain(hr, 50, 140);
     spo2 += random(-2, 3);
@@ -133,7 +133,6 @@ void sensorTask(void *pv) {
     checkThresholds();
 
 #if ENABLE_DEEP_SLEEP
-    // Adaptive deep sleep: only when vitals are stable
     if (!criticalCondition &&
         hr >= NORMAL_HR_MIN && hr <= NORMAL_HR_MAX &&
         spo2 >= NORMAL_SPO2_MIN && temp <= NORMAL_TEMP_MAX) {
@@ -172,8 +171,7 @@ void alertTask(void *pv) {
     bool btn = digitalRead(BUTTON_PIN);
     if (btn == LOW && lastButton == HIGH) {
       criticalCondition = !criticalCondition;
-      Serial.println(criticalCondition ? "Button: alarm ON" : "Button: 
-alarm OFF");
+      Serial.println(criticalCondition ? "Button: alarm ON" : "Button: alarm OFF");
       delay(200);
     }
     lastButton = btn;
@@ -191,8 +189,13 @@ void setup() {
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   digitalWrite(LED_PIN, LOW);
 
+  // Check SPIFFS, but don't crash if it's missing (like in Wokwi)
   if (!SPIFFS.begin(true)) {
-    Serial.println("SPIFFS mount failed");
+    Serial.println("⚠️ SPIFFS mount failed. Offline buffering will be disabled.");
+    spiffsAvailable = false;
+  } else {
+    Serial.println("SPIFFS mounted successfully.");
+    spiffsAvailable = true;
   }
 
   Serial.print("Connecting to WiFi");
@@ -208,12 +211,9 @@ void setup() {
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(mqttCallback);
 
-  xTaskCreatePinnedToCore(sensorTask,  "SensorTask",  4096, NULL, 1, 
-&sensorTaskHandle,  1);
-  xTaskCreatePinnedToCore(networkTask, "NetworkTask", 4096, NULL, 2, 
-&networkTaskHandle, 1);
-  xTaskCreatePinnedToCore(alertTask,   "AlertTask",   2048, NULL, 1, 
-&alertTaskHandle,   1);
+  xTaskCreatePinnedToCore(sensorTask,  "SensorTask",  4096, NULL, 1, &sensorTaskHandle,  1);
+  xTaskCreatePinnedToCore(networkTask, "NetworkTask", 4096, NULL, 2, &networkTaskHandle, 1);
+  xTaskCreatePinnedToCore(alertTask,   "AlertTask",   2048, NULL, 1, &alertTaskHandle,   1);
 
   Serial.println("FreeRTOS tasks started");
 }
